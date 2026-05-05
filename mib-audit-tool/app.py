@@ -300,19 +300,43 @@ if file_2:
 
             matched_count = src_keys.isin(tgt_keys).sum()
 
-            # Merge for comparison
+            # ── Safe Merge (Column name ထပ်နေမှု ကာကွယ်ခြင်း) ──────────────
+            # ပြဿနာ: Source နဲ့ Target မှာ Column name တူနေရင်
+            #         rename လုပ်လိုက်တဲ့အခါ column နှစ်ခုထပ်နေပြီး
+            #         pandas က merge မလုပ်နိုင်ဘဲ ValueError ပေးသည်။
+            # အဖြေ:  merge မလုပ်မီ unique join key column တစ်ခုထည့်ပြီး
+            #         merge key ကို တိတိကျကျ သတ်မှတ်ပေးသည်။
+
+            JOIN_KEY = "__merge_key__"   # temporary unique join column
+
             src_temp = working_df.copy()
-            src_temp[key_src] = src_temp[key_src].astype(str).str.strip()
+            src_temp[JOIN_KEY] = src_temp[key_src].astype(str).str.strip()
+
             tgt_temp = df2.copy()
-            tgt_temp[key_tgt] = tgt_temp[key_tgt].astype(str).str.strip()
-            tgt_temp = tgt_temp.rename(columns={key_tgt: key_src})
+            tgt_temp[JOIN_KEY] = tgt_temp[key_tgt].astype(str).str.strip()
+
+            # Source နဲ့ Target မှာ Column name တူနေလျှင် suffix ချပေးသည်
+            src_cols = set(src_temp.columns) - {JOIN_KEY}
+            tgt_cols = set(tgt_temp.columns) - {JOIN_KEY}
+            overlap  = src_cols & tgt_cols
+
+            if overlap:
+                src_temp = src_temp.rename(
+                    columns={c: f"{c}_Source" for c in overlap}
+                )
+                tgt_temp = tgt_temp.rename(
+                    columns={c: f"{c}_Target" for c in overlap}
+                )
 
             comparison_df = pd.merge(
                 src_temp, tgt_temp,
-                on=key_src,
+                on=JOIN_KEY,
                 how="inner",
-                suffixes=("_Source", "_Target"),
             )
+            # temporary key ဖယ်ထုတ်ပြီး ရှင်းသပ်သော output ပေးသည်
+            comparison_df.drop(columns=[JOIN_KEY], inplace=True)
+            src_temp.drop(columns=[JOIN_KEY], inplace=True)
+            tgt_temp.drop(columns=[JOIN_KEY], inplace=True)
 
         # ── KPI Summary ────────────────────────────────────────────────────
         st.markdown(f"""

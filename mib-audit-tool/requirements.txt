@@ -1,6 +1,5 @@
 streamlit
 pandas
 openpyxl
-xlsxwriter
-xlrd>=2.0.1
-chardet
+thefuzz
+python-Levenshtein

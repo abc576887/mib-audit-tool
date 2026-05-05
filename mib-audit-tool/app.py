@@ -1,72 +1,93 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
 
-st.set_page_config(page_title="Flexible Audit Tool", layout="wide")
+# --- Page Config ---
+st.set_page_config(page_title="Dynamic Audit Tool", layout="wide")
 
-def load_and_clean(file, sheet):
-    # Row 3 ကနေ စဖတ်မယ် (Format မတူရင်တောင် Table ခေါင်းစဉ်က အဲဒီနားမှာ ရှိတတ်လို့ပါ)
-    df = pd.read_excel(file, sheet_name=sheet, skiprows=3)
-    df.columns = [str(c).strip() for c in df.columns]
-    # Unnamed column တွေ ဖယ်မယ်
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-    return df
+# မြန်မာစာအတွက် CSS (Optional - standard streamlit support unicode)
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pyidaungsu&display=swap');
+    html, body, [class*="css"]  { font-family: 'Pyidaungsu', sans-serif; }
+    </style>
+    """, unsafe_allow_html=True)
 
-st.title("🛡️ SGF Flexible Audit Tool")
+st.title("🛡️ Universal Audit Tool (Dynamic Column Support)")
 
-uploaded_file = st.sidebar.file_uploader("Excel ဖိုင်တင်ပါ", type=["xlsx"])
+# --- Sidebar ---
+st.sidebar.header("Navigation")
+menu = st.sidebar.radio("Audit Module ရွေးချယ်ပါ", 
+    ["💰 Finance/Banking", "📦 Inventory", "🏭 Production"])
+
+# --- Flexible Data Loader ---
+def load_data(file):
+    try:
+        if file.name.endswith('.csv'):
+            return pd.read_csv(file)
+        elif file.name.endswith('.xlsb'):
+            return pd.read_excel(file, engine='pyxlsb')
+        else:
+            return pd.read_excel(file) # For .xlsx and .xls
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        return None
+
+# --- Main Logic ---
+uploaded_file = st.file_uploader("Excel သို့မဟုတ် CSV ဖိုင် တင်ပေးပါ", type=['csv', 'xlsx', 'xls', 'xlsb'])
 
 if uploaded_file:
-    xl = pd.ExcelFile(uploaded_file)
-    sheets = xl.sheet_names
+    df = load_data(uploaded_file)
     
-    st.sidebar.markdown("---")
-    selected_sheet = st.sidebar.selectbox("Audit လုပ်မည့် Sheet", sheets)
-    
-    # Data Loading
-    df = load_and_clean(uploaded_file, selected_sheet)
-    all_cols = df.columns.tolist()
+    if df is not None:
+        # Heading တွေအားလုံးကို List အနေနဲ့ ယူမယ်
+        all_columns = df.columns.tolist()
+        
+        st.success("File Upload အောင်မြင်ပါသည်။")
+        st.write("### Data Preview (ပထမ ၅ ကြောင်း)")
+        st.dataframe(df.head())
 
-    st.subheader(f"🔍 Column Matching for: {selected_sheet}")
-    st.write("Excel ထဲက Column အမည်တွေ မတူရင်တောင် အောက်မှာ သက်ဆိုင်ရာ Column ကို ရွေးပေးပါ")
-
-    # Column တွေကို User က Manual ချိတ်ပေးရမယ့်အပိုင်း
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        id_col = st.selectbox("Product Code (Key)", all_cols, index=0)
-        desc_col = st.selectbox("Description", all_cols, index=1)
-    with col2:
-        open_col = st.selectbox("Opening Balance", all_cols)
-        receive_col = st.selectbox("Total Received", all_cols)
-    with col3:
-        close_col = st.selectbox("Closing Balance", all_cols)
-        usage_col = st.selectbox("Total Usage/Out", all_cols)
-
-    if st.button("📊 စာရင်းတိုက်စစ်မည်"):
-        # Numeric ပြောင်းခြင်း
-        for c in [open_col, receive_col, close_col, usage_col]:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-
-        # Audit Logic 1: Opening + Received - Usage = Closing
-        df['Calculated_Closing'] = df[open_col] + df[receive_col] - df[usage_col]
-        df['Diff'] = df['Calculated_Closing'] - df[close_col]
-
-        # Difference ရှိတာတွေကို စစ်ထုတ်ခြင်း
-        error_df = df[df['Diff'].abs() > 0.01].copy()
-
-        if not error_df.empty:
-            st.error(f"❌ ကွာဟချက် {len(error_df)} ခု တွေ့ရှိရပါသည်။")
-            # လိုအပ်တဲ့ Column တွေကိုပဲ ပြမယ်
-            display_cols = [id_col, desc_col, open_col, receive_col, usage_col, close_col, 'Calculated_Closing', 'Diff']
-            st.dataframe(error_df[display_cols])
+        # --- Finance Module ---
+        if menu == "💰 Finance/Banking":
+            st.subheader("Finance Audit Logic")
             
-            # Export
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                error_df.to_excel(writer, index=False, sheet_name='Audit_Report')
-            st.download_button("Download Audit Report", output.getvalue(), "audit_result.xlsx")
-        else:
-            st.success("✅ စာရင်းများအားလုံး ကိုက်ညီမှုရှိပါသည်။ (Mathematical Consistency OK)")
+            col1, col2 = st.columns(2)
+            with col1:
+                # Column နာမည်ကို အသေမယူဘဲ User ကို ရွေးခိုင်းမယ်
+                amount_col = st.selectbox("ငွေပမာဏ Column ကို ရွေးပါ (Amount)", all_columns)
+                date_col = st.selectbox("ရက်စွဲ Column ကို ရွေးပါ (Date)", all_columns)
+            
+            with col2:
+                threshold = st.number_input("စစ်ဆေးလိုသည့် အနည်းဆုံး ပမာဏ (Threshold)", value=100000)
 
-else:
-    st.info("အလုပ်စတင်ရန် ဘယ်ဘက်မှ Excel File ကိုအရင် Upload တင်ပါ။")
+            # Calculation
+            high_values = df[df[amount_col] >= threshold]
+            st.warning(f"သတ်မှတ်ချက်ထက်ကျော်သော စာရင်းပေါင်း: {len(high_values)}")
+            st.dataframe(high_values)
+
+        # --- Inventory Module ---
+        elif menu == "📦 Inventory":
+            st.subheader("Inventory Audit Logic")
+            
+            stock_col = st.selectbox("လက်ကျန်အရေအတွက် Column ကို ရွေးပါ (Quantity)", all_columns)
+            
+            # Negative Stock Check
+            neg_stock = df[df[stock_col] < 0]
+            if not neg_stock.empty:
+                st.error(f"လက်ကျန်အနှုတ်ပြနေသော စာရင်း {len(neg_stock)} ခု တွေ့ရှိပါသည်။")
+                st.dataframe(neg_stock)
+            else:
+                st.balloons()
+                st.success("လက်ကျန်အနှုတ်စာရင်း မရှိပါ။")
+
+        # --- Production Module ---
+        elif menu == "🏭 Production":
+            st.subheader("Production & Principal Reconciliation")
+            
+            join_col = st.selectbox("နှိုင်းယှဉ်မည့် Key Column ကိုရွေးပါ (ဥပမာ - SKU သို့မဟုတ် ID)", all_columns)
+            val_col = st.selectbox("စစ်ဆေးမည့် Value Column (ဥပမာ - Production Qty)", all_columns)
+            
+            # ဤနေရာတွင် ဒုတိယဖိုင်နှင့် ချိတ်ဆက်ခြင်း သို့မဟုတ် Target နှင့် နှိုင်းယှဉ်ခြင်း လုပ်နိုင်သည်
+            st.info(f"{join_col} အပေါ် အခြေခံ၍ {val_col} ကို စစ်ဆေးရန် အဆင်သင့်ဖြစ်ပါပြီ။")
+
+# --- Libraries Install လုပ်ရန် လိုအပ်ချက် ---
+# pip install streamlit pandas openpyxl pyxlsb

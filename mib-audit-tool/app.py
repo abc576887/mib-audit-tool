@@ -4,144 +4,110 @@ import io
 import plotly.express as px
 
 # Professional Theme Configuration
-st.set_page_config(
-    page_title="AuditLink Pro | Internal Audit Suite",
-    page_icon="🛡️",
-    layout="wide"
-)
+st.set_page_config(page_title="Auditor-Pro | Precision Edition", page_icon="🛡️", layout="wide")
 
-# Custom Styling
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { border: 1px solid #dee2e6; padding: 15px; border-radius: 10px; background: white; }
-    .audit-header { color: #1e3a8a; font-weight: bold; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
+    .stMetric { border-left: 5px solid #1e3a8a; background: white; padding: 15px; border-radius: 10px; }
+    h1 { color: #1e3a8a; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR: စစ်ဆေးမှု ထိန်းချုပ်ခန်း ---
+st.title("🛡️ Auditor-Pro: Precision Audit & Rounding Analysis")
+
+# --- SIDEBAR: AUDIT CONTROLS ---
 with st.sidebar:
-    st.title("🛡️ Audit Controls")
-    st.markdown("### ⚙️ ကန့်သတ်ချက်များ သတ်မှတ်ရန်")
+    st.header("⚙️ Precision Settings")
+    # Rounding Finder အတွက် Control
+    st.subheader("Rounding Analysis")
+    min_rounding = st.number_input("အနည်းဆုံး ကွဲလွဲမှု (Min Difference)", value=0.01, format="%.2f")
+    max_rounding = st.number_input("အများဆုံး ကွဲလွဲမှု (Max Difference)", value=1000.0, format="%.2f")
     
-    # Materiality Threshold သတ်မှတ်ခြင်း
-    threshold = st.number_input("လက်ခံနိုင်သော ကွဲလွဲမှု ပမာဏ (Materiality)", value=0.0, step=0.01)
-    
-    st.markdown("---")
-    st.info("""
-    💡 **Auditor Tip:** 
-    စာရင်းမတိုက်စစ်မီ ပင်မ Ledger ထဲတွင် Duplicate (စာရင်းထပ်နေခြင်း) ရှိမရှိကို အရင်စစ်ဆေးပါ။
-    """)
+    st.divider()
+    st.info("💡 **Auditor Tip:** Rounding အသေးလေးတွေဟာ Exchange Rate ကြောင့် ဖြစ်နိုင်သလို၊ Rounding အကြီးကြီးတွေဟာ စာရင်းမှားယွင်းမှု (သို့မဟုတ်) လိမ်လည်မှု ဖြစ်နိုင်ပါတယ်။")
 
-# --- MAIN INTERFACE ---
-st.markdown("<h1 class='audit-header'>🛡️ Professional Internal Audit System</h1>", unsafe_allow_html=True)
-
-# ၁။ Data တင်သွင်းခြင်း (Ingestion)
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown("#### 📁 အဆင့် (၁): ပင်မစာရင်းဖိုင် (Main Ledger)")
-    main_file = st.file_uploader("Ledger တင်ရန် (XLSX, XLS, CSV)", type=['xlsx', 'xls', 'csv'], key="main")
-with col2:
-    st.markdown("#### 📁 အဆင့် (၂): တိုက်စစ်မည့်ဖိုင် (Statement/Reference)")
-    ref_file = st.file_uploader("Reference တင်ရန် (XLSX, XLS, CSV)", type=['xlsx', 'xls', 'csv'], key="ref")
-
-@st.cache_data
+# --- DATA LOADING ---
 def load_data(file):
     if file is None: return None
+    ext = file.name.split('.')[-1].lower()
     try:
-        if file.name.endswith('.csv'):
-            return pd.read_csv(file, encoding='utf-8-sig')
-        return pd.read_excel(file)
+        if ext == 'csv': return pd.read_csv(file, encoding='utf-8-sig')
+        elif ext == 'xls': return pd.read_excel(file, engine='xlrd')
+        else: return pd.read_excel(file, engine='openpyxl')
     except Exception as e:
-        st.error(f"ဖိုင်ဖတ်ရာတွင် အမှားရှိနေပါသည်: {e}")
+        st.error(f"Error: {e}")
         return None
 
-df_main = load_data(main_file)
-df_ref = load_data(ref_file)
+col1, col2 = st.columns(2)
+with col1:
+    main_file = st.file_uploader("📁 ပင်မစာရင်း (Main Ledger)", type=['xlsx', 'xls', 'csv'])
+with col2:
+    ref_file = st.file_uploader("📁 တိုက်စစ်မည့်စာရင်း (Reference)", type=['xlsx', 'xls', 'csv'])
 
-if df_main is not None and df_ref is not None:
-    # ၂။ Column Mapping UI
-    with st.expander("🔗 Field Mapping - ကော်လံများ ချိတ်ဆက်ခြင်း", expanded=True):
+if main_file and ref_file:
+    df_main = load_data(main_file)
+    df_ref = load_data(ref_file)
+
+    with st.expander("🔗 Column Mapping", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
-        with c1: key_main = st.selectbox("ID/Voucher Column (Source)", df_main.columns)
-        with c2: key_ref = st.selectbox("ID/Voucher Column (Target)", df_ref.columns)
-        with c3: amt_main = st.selectbox("Amount Column (Source)", df_main.columns)
-        with c4: amt_ref = st.selectbox("Amount Column (Target)", df_ref.columns)
+        key_main = c1.selectbox("ID/Voucher (Source)", df_main.columns)
+        key_ref = c2.selectbox("ID/Voucher (Target)", df_ref.columns)
+        amt_main = c3.selectbox("Amount (Source)", df_main.columns)
+        amt_ref = c4.selectbox("Amount (Target)", df_ref.columns)
 
-    if st.button("🚀 စစ်ဆေးမှု စတင်မည်", use_container_width=True):
-        # Data Cleaning
+    if st.button("🚀 Run Precision Audit Analysis", use_container_width=True):
+        # Data Pre-processing
         df_main[key_main] = df_main[key_main].astype(str).str.strip()
         df_ref[key_ref] = df_ref[key_ref].astype(str).str.strip()
 
-        # အဆင့်မြင့် Reconciliation Logic
+        # Reconciliation Logic
         recon = pd.merge(df_main, df_ref, left_on=key_main, right_on=key_ref, how='outer', indicator=True)
-        recon['Difference'] = recon[amt_main].fillna(0) - recon[amt_ref].fillna(0)
-        
-        # Exceptions ခွဲထုတ်ခြင်း
-        matched = recon[recon['_merge'] == 'both']
-        missing_in_ref = recon[recon['_merge'] == 'left_only']
-        missing_in_main = recon[recon['_merge'] == 'right_only']
-        material_variances = matched[matched['Difference'].abs() > threshold]
+        recon['Variance'] = (recon[amt_main].fillna(0) - recon[amt_ref].fillna(0)).round(4)
+        recon['Abs_Variance'] = recon['Variance'].abs()
 
-        # ၃။ Dashboard ပြသခြင်း
-        st.markdown("### 📊 စစ်ဆေးမှု ရလဒ် ခြုံငုံသုံးသပ်ချက်")
+        # 1. Rounding Analysis Logic
+        # အသေးအမွှား rounding နှင့် အကြီးစား rounding များကို ခွဲထုတ်ခြင်း
+        rounding_issues = recon[(recon['_merge'] == 'both') & 
+                                (recon['Abs_Variance'] >= min_rounding) & 
+                                (recon['Abs_Variance'] <= max_rounding)]
+        
+        big_issues = recon[(recon['_merge'] == 'both') & (recon['Abs_Variance'] > max_rounding)]
+
+        # Dashboard
+        st.divider()
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("ကိုက်ညီသော စာရင်း", len(matched))
-        m2.metric("ကျန်ခဲ့သော စာရင်း (Missing)", len(missing_in_ref))
-        m3.metric("ပမာဏ ကွဲလွဲမှု (Variance)", len(material_variances))
-        m4.metric("အန္တရာယ်ရှိနိုင်သော စာရင်း (Risk)", len(missing_in_ref) + len(material_variances))
+        m1.metric("Fully Matched", len(recon[recon['Variance'] == 0]))
+        m2.metric("Rounding Issues", len(rounding_issues))
+        m3.metric("Big Variance (High Risk)", len(big_issues))
+        m4.metric("Missing Entries", len(recon[recon['_merge'] != 'both']))
 
-        # Chart ပြသခြင်း
-        fig = px.pie(values=[len(matched), len(missing_in_ref), len(material_variances)], 
-                     names=['Full Match', 'Missing Records', 'Amount Variance'],
-                     color_discrete_sequence=['#10b981', '#ef4444', '#f59e0b'],
-                     hole=0.4)
-        st.plotly_chart(fig, use_container_width=True)
+        # Tabs for Findings
+        tab1, tab2, tab3 = st.tabs(["🔎 Rounding & Small Diff", "🚨 High Risk Variances", "📊 Data Distribution"])
 
-        # ၄။ အသေးစိတ် Exception Tabs
-        tab1, tab2, tab3, tab4 = st.tabs(["💰 ပမာဏ ကွဲလွဲချက်များ", "🚩 ကျန်ခဲ့သော စာရင်းများ", "👯 Double Entry စစ်ဆေးချက်", "📜 မှတ်တမ်းအပြည့်အစုံ"])
-        
         with tab1:
-            st.warning("သတ်မှတ်ထားသော Materiality ထက် ပိုနေသော ကွဲလွဲချက်များ")
-            st.dataframe(material_variances[[key_main, amt_main, amt_ref, 'Difference']])
+            st.write(f"### ပမာဏ {min_rounding} နှင့် {max_rounding} ကြားရှိသော ကွဲလွဲချက်များ")
+            st.dataframe(rounding_issues[[key_main, amt_main, amt_ref, 'Variance']])
 
         with tab2:
-            st.error("တစ်ဖက်ဖက်တွင် ကျန်ခဲ့သော စာရင်းများ")
-            ca, cb = st.columns(2)
-            ca.write("**Main Ledger တွင်သာ ရှိသောစာရင်း**")
-            ca.dataframe(missing_in_ref)
-            cb.write("**Reference တွင်သာ ရှိသောစာရင်း**")
-            cb.dataframe(missing_in_main)
+            st.error(f"### ပမာဏ {max_rounding} ထက်ကျော်သော အကြီးစား ကွဲလွဲချက်များ")
+            st.dataframe(big_issues[[key_main, amt_main, amt_ref, 'Variance']])
 
         with tab3:
-            st.info("ပင်မစာရင်းတွင် ID တူပြီး ထပ်နေသော စာရင်းများ")
-            dupes = df_main[df_main.duplicated(subset=[key_main], keep=False)]
-            st.dataframe(dupes)
+            st.write("### Variance Distribution Chart")
+            fig = px.scatter(recon[recon['_merge'] == 'both'], x=key_main, y="Variance", 
+                             color="Abs_Variance", size="Abs_Variance",
+                             title="Visualizing All Discrepancies (Big & Small)")
+            st.plotly_chart(fig, use_container_width=True)
 
-        with tab4:
-            st.write("တိုက်စစ်ထားသော စာရင်းမှတ်တမ်း အပြည့်အစုံ")
-            st.dataframe(recon)
-
-        # ၅။ Report ထုတ်ယူခြင်း
-        st.markdown("---")
+        # Download Report
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            recon.to_excel(writer, sheet_name='Audit_Trail', index=False)
-            material_variances.to_excel(writer, sheet_name='Exceptions', index=False)
-            dupes.to_excel(writer, sheet_name='Duplicates', index=False)
-        
-        st.download_button(
-            label="📥 Audit Report (Excel) ထုတ်ယူရန်",
-            data=output.getvalue(),
-            file_name="Audit_Report_Myanmar.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+            recon.to_excel(writer, sheet_name='Full_Log', index=False)
+            rounding_issues.to_excel(writer, sheet_name='Rounding_Issues', index=False)
+            big_issues.to_excel(writer, sheet_name='Major_Exceptions', index=False)
+
+        st.download_button("📥 Download Precision Audit Report", output.getvalue(), 
+                           "Precision_Audit_Report.xlsx", use_container_width=True)
+
 else:
-    st.markdown("""
-    ### 🔰 အသုံးပြုနည်း လမ်းညွှန်
-    1. **ပင်မစာရင်း** နှင့် **တိုက်စစ်မည့်ဖိုင်** ကို အပေါ်တွင် Upload တင်ပါ။
-    2. ကော်လံအမည်များကို မှန်ကန်စွာ ချိတ်ဆက်ပေးပါ။
-    3. **Execute** ခလုတ်ကို နှိပ်ပြီး Dashboard တွင် ရလဒ်များ ကြည့်ရှုပါ။
-    4. လိုအပ်ပါက **Excel Report** ကို ဒေါင်းလုဒ်ဆွဲ၍ စာရင်းစစ် အထောက်အထားအဖြစ် သိမ်းဆည်းပါ။
-    """)
+    st.info("💡 စတင်ရန် ဖိုင်များကို Upload တင်ပါ။ Sidebar တွင် Rounding အကွာအဝေးကို သတ်မှတ်နိုင်ပါသည်။")

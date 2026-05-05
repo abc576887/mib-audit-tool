@@ -3,8 +3,7 @@ import pandas as pd
 import io
 
 # Page Config
-st.set_config(page_title="AuditLink Pro - MM", layout="wide")
-
+st.set_page_config(page_title="AuditLink Pro - MM", layout="wide")
 st.title("🔍 စမတ်ကျသော စာရင်းစစ်နှင့် တိုက်စစ်စနစ် (Audit & Recon)")
 st.info("💡 Excel Version အားလုံးနှင့် မြန်မာစာ (Unicode/Zawgyi) ကို အထောက်အပံ့ပေးပါသည်။")
 

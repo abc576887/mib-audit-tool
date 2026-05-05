@@ -1,62 +1,106 @@
 import streamlit as st
 import pandas as pd
+import io
 
-# --- Page Config ---
-st.set_page_config(page_title="Multi-Sheet Audit Tool", layout="wide")
+# --- Page Settings ---
+st.set_page_config(page_title="Audit Pro - Myanmar", layout="wide")
 
-# --- File Loader Function ---
-def get_all_sheets(file):
+# Myanmar Unicode Font Support
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pyidaungsu:wght@400;700&display=swap');
+    body, div, span, h1, h2, h3, p, th, td { font-family: 'Pyidaungsu', sans-serif !important; }
+    .main { background-color: #f8f9fa; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🛡️ Enterprise Audit & Reconciliation System")
+st.markdown("---")
+
+# --- Multi-format File Loader ---
+def load_excel_sheets(file):
     try:
-        # Excel ဖိုင်ထဲက Sheet နာမည်အားလုံးကို ဖတ်မယ်
-        xl = pd.ExcelFile(file)
-        return xl.sheet_names
+        if file.name.endswith('.xlsb'):
+            return pd.ExcelFile(file, engine='pyxlsb')
+        else:
+            return pd.ExcelFile(file)
     except Exception as e:
-        st.error(f"Error reading sheets: {e}")
-        return []
+        st.error(f"Error: {e}")
+        return None
 
-# --- Main App ---
-st.title("🛡️ Multi-Sheet Dynamic Audit Tool")
+# --- Sidebar Configuration ---
+st.sidebar.header("⚙️ Settings")
+file_a = st.sidebar.file_uploader("Source File (File A)", type=['xlsx', 'xls', 'xlsb'])
+file_b = st.sidebar.file_uploader("Target File (File B)", type=['xlsx', 'xls', 'xlsb'])
 
-uploaded_file = st.file_uploader("Excel ဖိုင်တင်ပါ", type=['xlsx', 'xls', 'xlsb'])
-
-if uploaded_file:
-    # 1. Sheet နာမည်တွေကို အရင်ပြမယ်
-    sheet_names = get_all_sheets(uploaded_file)
+if file_a and file_b:
+    excel_a = load_excel_sheets(file_a)
+    excel_b = load_excel_sheets(file_b)
     
-    if sheet_names:
-        selected_sheet = st.sidebar.selectbox("စစ်ဆေးမည့် Sheet ကိုရွေးပါ", sheet_names)
+    # နှစ်ဖိုင်လုံးမှာ တူတဲ့ Sheet နာမည်တွေကို ယူမယ်
+    common_sheets = list(set(excel_a.sheet_names) & set(excel_b.sheet_names))
+    
+    if not common_sheets:
+        st.error("❌ Sheet နာမည်တူ တစ်ခုမှ မတွေ့ပါ။")
+    else:
+        selected_sheets = st.multiselect("စစ်ဆေးမည့် Sheet များ ရွေးချယ်ပါ", common_sheets, default=common_sheets)
         
-        # 2. ရွေးချယ်လိုက်တဲ့ Sheet တစ်ခုတည်းကိုပဲ ဖတ်မယ်
-        df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
-        
-        st.success(f"Selected Sheet: {selected_sheet}")
-        
-        # 3. Column Heading များကို ယူမယ်
-        all_columns = df.columns.tolist()
-        
-        # UI Layout
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.subheader("Audit Parameters")
-            target_col = st.selectbox("စစ်ဆေးမည့် Column (Heading)", all_columns)
-            audit_type = st.radio("စစ်ဆေးမည့်ပုံစံ", ["Duplicate Check", "Negative Value", "Blank Cells"])
-            
-        with col2:
-            st.subheader("Result Preview")
-            if audit_type == "Duplicate Check":
-                results = df[df.duplicated(subset=[target_col], keep=False)]
-                st.write(f"ထပ်နေသောစာရင်း: {len(results)}")
-                st.dataframe(results)
-                
-            elif audit_type == "Negative Value":
-                # Numeric ဖြစ်မှ စစ်လို့ရအောင် handle လုပ်မယ်
-                df[target_col] = pd.to_numeric(df[target_col], errors='coerce')
-                results = df[df[target_col] < 0]
-                st.write(f"အနှုတ်စာရင်း: {len(results)}")
-                st.dataframe(results)
+        # Unique Key ရွေးရန် (ပထမ Sheet ကနေ Column နာမည်တွေ ယူပြမယ်)
+        sample_df = pd.read_excel(file_a, sheet_name=selected_sheets[0])
+        key_col = st.selectbox("အဓိက တိုက်စစ်မည့် Column (Unique Key) ကိုရွေးပါ (ဥပမာ - Voucher No, ID)", sample_df.columns)
 
-            elif audit_type == "Blank Cells":
-                results = df[df[target_col].isna()]
-                st.write(f"လွတ်နေသောစာရင်း: {len(results)}")
-                st.dataframe(results)
+        if st.button("🚀 စတင်တိုက်စစ်မည်"):
+            output = io.BytesIO()
+            # Excel Report ထုတ်ဖို့ Writer အဆင်သင့်လုပ်ထားမယ်
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                
+                for sheet in selected_sheets:
+                    st.write(f"### 📋 Sheet: {sheet}")
+                    
+                    df_a = pd.read_excel(file_a, sheet_name=sheet)
+                    df_b = pd.read_excel(file_b, sheet_name=sheet)
+
+                    # 1. Missing Rows (ဘယ်ဖိုင်မှာ ဘာတွေ လိုနေလဲ)
+                    missing_in_b = df_a[~df_a[key_col].isin(df_b[key_col])]
+                    missing_in_a = df_b[~df_b[key_col].isin(df_a[key_col])]
+
+                    # 2. Value Mismatch (ID တူပေမယ့် ကျန်တာ ကွဲနေတာ)
+                    common_ids = set(df_a[key_col]) & set(df_b[key_col])
+                    temp_a = df_a[df_a[key_col].isin(common_ids)].set_index(key_col)
+                    temp_b = df_b[df_b[key_col].isin(common_ids)].set_index(key_col)
+                    
+                    common_cols = list(set(temp_a.columns) & set(temp_b.columns))
+                    diff_mask = (temp_a[common_cols] != temp_b[common_cols]).any(axis=1)
+                    mismatches = temp_a.loc[diff_mask, common_cols].copy()
+                    
+                    # Display Results in Tabs
+                    tab1, tab2, tab3 = st.tabs(["Missing in B", "Missing in A", "Value Mismatches"])
+                    
+                    with tab1:
+                        st.dataframe(missing_in_b)
+                        if not missing_in_b.empty:
+                            missing_in_b.to_excel(writer, sheet_name=f"{sheet}_Missing_in_B", index=False)
+                    
+                    with tab2:
+                        st.dataframe(missing_in_a)
+                        if not missing_in_a.empty:
+                            missing_in_a.to_excel(writer, sheet_name=f"{sheet}_Missing_in_A", index=False)
+                            
+                    with tab3:
+                        st.dataframe(mismatches)
+                        if not mismatches.empty:
+                            mismatches.to_excel(writer, sheet_name=f"{sheet}_Mismatches")
+
+                    st.markdown("---")
+            
+            # Download Button
+            st.success("✅ စစ်ဆေးခြင်း ပြီးဆုံးပါပြီ။")
+            st.download_button(
+                label="📥 Download Audit Report (Excel)",
+                data=output.getvalue(),
+                file_name="Audit_Findings_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+else:
+    st.warning("👈 ဆက်လက်ဆောင်ရွက်ရန် ဘယ်ဘက် Sidebar မှ ဖိုင်နှစ်ခုလုံးကို Upload တင်ပေးပါ။")

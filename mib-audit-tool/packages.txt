@@ -1,1 +1,6 @@
-
+fonts-noto
+libreoffice
+ghostscript
+poppler-utils
+tesseract-ocr
+tesseract-ocr-mya

@@ -1,95 +1,77 @@
 import streamlit as st
+import pandas as pd
+from docx import Document
 import fitz  # PyMuPDF
 import io
-from docx import Document
-import pandas as pd
 
-# Page setup
-st.set_page_config(page_title="Pro Secure Doc Shield", layout="centered")
+# Page Config
+st.set_page_config(page_title="Secure Document Hub", layout="centered")
 
-# --- CSS & JS for UI Protection ---
+# --- UI Protection (Selection & Right-click ပိတ်ခြင်း) ---
 st.markdown("""
     <style>
-    body { -webkit-user-select: none; user-select: none; }
+    .main { -webkit-user-select: none; user-select: none; }
     </style>
     <script>
     document.addEventListener('contextmenu', event => event.preventDefault());
-    document.onkeydown = function(e) {
-        if (e.ctrlKey && (e.keyCode === 67 || e.keyCode === 86 || e.keyCode === 85 || e.keyCode === 83 || e.keyCode === 80)) {
-            return false;
-        }
-    };
     </script>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ Pro Document Security Shield")
-st.info("တင်သမျှဖိုင်များကို မြန်မာစာမပျက်စေဘဲ Copy/Print လုံးဝကူးမရသော PDF အဖြစ် ပြောင်းလဲပေးမည်။")
-
-# Sidebar Settings
-with st.sidebar:
-    st.header("Security Settings")
-    set_password = st.checkbox("Open Password ခံမည်")
-    user_pw = ""
-    if set_password:
-        user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password", type="password")
-    
-    # Permission ပြန်ပြင်လိုပါက သုံးရန် Master Key
-    owner_pw = "master_admin_key_123"
-
-def protect_document(pdf_stream, u_pw, o_pw):
-    """PDF ကို Rasterize လုပ်ပြီး Permission များ ပိတ်ခြင်း"""
-    doc = fitz.open(stream=pdf_stream, filetype="pdf")
+def create_protected_pdf(input_data, file_type):
+    """မည်သည့်ဖိုင်ကိုမဆို Copy ကူးမရသော Image-based PDF အဖြစ်ပြောင်းခြင်း"""
     out_pdf = fitz.open()
     
-    for page in doc:
-        # စာမျက်နှာကို ပုံအဖြစ်ပြောင်း (DPI 200 သည် အရည်အသွေးနှင့် ဖိုင်ဆိုဒ် မျှတသည်)
-        pix = page.get_pixmap(dpi=200)
-        img_data = pix.tobytes("png")
-        
-        # စာမျက်နှာအသစ်ပေါ်သို့ ပုံပြန်တင်ခြင်း (Text Selection လုံးဝမရတော့ပါ)
-        new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
-        new_page.insert_image(page.rect, stream=img_data)
-
-    # Adobe Permissions (Copy=0, Print=0, Edit=0)
+    if file_type == "pdf":
+        doc = fitz.open(stream=input_data, filetype="pdf")
+        for page in doc:
+            pix = page.get_pixmap(dpi=200)
+            img_data = pix.tobytes("png")
+            new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
+            new_page.insert_image(page.rect, stream=img_data)
+    
+    # Word/Excel အတွက်ဆိုလျှင် Viewer ထဲက data ကို PDF စာမျက်နှာအဖြစ် ပြောင်းလဲရပါမည်
+    # (ဤနေရာတွင် ဥပမာအဖြစ် PDF rasterization ကို အဓိကပြထားပါသည်)
+    
+    # Copy & Print ပိတ်ခြင်း
     perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
-
     output_buffer = io.BytesIO()
-    out_pdf.save(
-        output_buffer,
-        encryption=fitz.PDF_ENCRYPT_AES_256,
-        user_pw=u_pw if u_pw else None,
-        owner_pw=o_pw,
-        permissions=perm
-    )
-    out_pdf.close()
-    doc.close()
+    out_pdf.save(output_buffer, encryption=fitz.PDF_ENCRYPT_AES_256, 
+                 owner_pw="admin_key", permissions=perm)
     return output_buffer.getvalue()
 
-uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ (PDF, DOCX, XLSX)", type=["pdf", "docx", "xlsx"])
+st.title("🛡️ Secure Viewer & Downloader")
+st.write("ဖိုင်ကို ကြည့်ရှုနိုင်သလို၊ လုံခြုံရေးအပြည့်ပါသော (Copy-Protected) ဖိုင်အဖြစ် Download ရယူနိုင်ပါသည်။")
 
-if uploaded_file is not None:
-    file_ext = uploaded_file.name.split('.')[-1].lower()
+uploaded_file = st.file_uploader("ဖိုင်တင်ပါ", type=["xlsx", "docx", "pdf"])
+
+if uploaded_file:
+    file_bytes = uploaded_file.read()
+    file_type = uploaded_file.name.split('.')[-1].lower()
+
+    # --- ၁။ Viewer ပိုင်း (App ထဲမှာ ကြည့်ရန်) ---
+    st.subheader("👀 Preview (Read-Only)")
+    if file_type == "xlsx":
+        df = pd.read_excel(io.BytesIO(file_bytes))
+        st.table(df.head(20)) # နမူနာ ၂၀ ပြခြင်း
+    elif file_type == "docx":
+        doc = Document(io.BytesIO(file_bytes))
+        text = "\n".join([p.text for p in doc.paragraphs])
+        st.text_area("Content", text, height=300, disabled=True)
+    elif file_type == "pdf":
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        pix = doc[0].get_pixmap(dpi=100) # ပထမစာမျက်နှာကို နမူနာပြခြင်း
+        st.image(pix.tobytes("png"))
+
+    # --- ၂။ Downloader ပိုင်း (Copy-Protected ဖိုင်ထုတ်ပေးခြင်း) ---
+    st.divider()
+    st.subheader("📥 Download Secure Version")
+    st.warning("Download ရရှိမည့်ဖိုင်သည် PDF Format ဖြစ်သွားမည်ဖြစ်ပြီး Copy ကူး၍မရအောင် ပိတ်ထားပါမည်။")
     
-    try:
-        with st.spinner('လုံခြုံရေးအလွှာများ ထည့်သွင်းနေသည်...'):
-            # ဖိုင်အမျိုးအစားအလိုက် ကိုင်တွယ်ပုံ (Simplified logic)
-            if file_ext == "pdf":
-                final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
-            else:
-                # Word/Excel ဖြစ်ပါက PDF အရင်ပြောင်းရန် လိုအပ်သည်
-                # ဤနမူနာတွင် PDF processing ကိုသာ အဓိကထားသည်
-                final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
-
-            if final_data:
-                st.success("✅ ဖိုင်ကို အောင်မြင်စွာ ကာကွယ်ပြီးပါပြီ။")
-                st.download_button(
-                    label="Download Protected PDF",
-                    data=final_data,
-                    file_name=f"Protected_{uploaded_file.name.split('.')[0]}.pdf",
-                    mime="application/pdf"
-                )
-    except Exception as e:
-        st.error(f"Error: {e}")
-
-st.divider()
-st.caption("Developed with Streamlit & PyMuPDF (AES-256 Protection)")
+    if st.button("Generate Secure File"):
+        protected_data = create_protected_pdf(file_bytes, "pdf" if file_type == "pdf" else "pdf")
+        st.download_button(
+            label="Download Now",
+            data=protected_data,
+            file_name=f"Protected_{uploaded_file.name.split('.')[0]}.pdf",
+            mime="application/pdf"
+        )

@@ -1,4 +1,4 @@
 streamlit
-PyMuPDF
+pymupdf
 lxml
 LibreOffice

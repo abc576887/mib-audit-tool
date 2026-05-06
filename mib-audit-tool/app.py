@@ -1,88 +1,81 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import io
-from docx import Document
 import pandas as pd
+from docx import Document
+from fpdf import FPDF
 
-# Page setup
 st.set_page_config(page_title="Pro Secure Doc Shield", layout="centered")
 
-# --- UI Protection (Right-click & Selection ပိတ်ခြင်း) ---
+# --- UI Protection ---
 st.markdown("""
-    <style>
-    body { -webkit-user-select: none; user-select: none; }
-    .stApp { pointer-events: auto; }
-    </style>
-    <script>
-    document.addEventListener('contextmenu', event => event.preventDefault());
-    document.onkeydown = function(e) {
-        if (e.ctrlKey && (e.keyCode === 67 || e.keyCode === 86 || e.keyCode === 85 || e.keyCode === 83 || e.keyCode === 80)) {
-            return false;
-        }
-    };
-    </script>
+    <style> body { -webkit-user-select: none; user-select: none; } </style>
+    <script> document.addEventListener('contextmenu', event => event.preventDefault()); </script>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ Pro Document Security Shield")
-st.info("ဖိုင်ဆိုဒ်ကို ချုံ့ပေးထားပြီး Copy/Print ပိတ်ထားသော PDF အဖြစ် ပြောင်းလဲပေးမည်။")
-
-# Sidebar Settings
-with st.sidebar:
-    st.header("Security Settings")
-    set_password = st.checkbox("Open Password ခံမည်")
-    user_pw = ""
-    if set_password:
-        user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password", type="password")
+def excel_to_pdf(excel_file):
+    """Excel data ကို ယာယီ PDF တစ်ခုအဖြစ် ပြောင်းလဲခြင်း"""
+    df = pd.read_excel(excel_file)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
     
-    owner_pw = "master_admin_key_123"
+    # ဇယားခေါင်းစဉ်များ
+    cols = df.columns.tolist()
+    for col in cols:
+        pdf.cell(40, 10, str(col), border=1)
+    pdf.ln()
+    
+    # Data များ (နမူနာ အတန်း ၅၀ ထိသာ ထည့်သွင်းပေးထားပါသည် - ဆိုဒ်မကြီးစေရန်)
+    for i in range(min(len(df), 50)):
+        for col in cols:
+            pdf.cell(40, 10, str(df.iloc[i][col]), border=1)
+        pdf.ln()
+    
+    return pdf.output()
 
-def protect_document(pdf_stream, u_pw, o_pw):
-    """ဖိုင်ဆိုဒ်ကို အတတ်နိုင်ဆုံး လျှော့ချထားသော Protection Function"""
-    doc = fitz.open(stream=pdf_stream, filetype="pdf")
+def protect_document(pdf_bytes, u_pw, o_pw):
+    """PDF ကို Rasterize လုပ်ပြီး Permission များ ပိတ်ခြင်း"""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     out_pdf = fitz.open()
     
     for page in doc:
-        # DPI ကို 150 သို့လျှော့ချခြင်း (ဖိုင်ဆိုဒ် သိသိသာသာ သေးသွားစေသည်)
         pix = page.get_pixmap(dpi=150)
-        
-        # PNG အစား JPG သုံးပြီး Quality ကို 70% ထားခြင်း (ဆိုဒ်အလွန်သေးသွားစေသည်)
         img_data = pix.tobytes("jpg", jpg_quality=70)
-        
         new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
 
-    # Adobe Permissions (Copy=0, Print=0, Edit=0)
     perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
-
     output_buffer = io.BytesIO()
-    
-    # deflate=True သုံးပြီး PDF ထဲက Data များကို ထပ်မံချုံ့ခြင်း
-    out_pdf.save(
-        output_buffer,
-        encryption=fitz.PDF_ENCRYPT_AES_256,
-        user_pw=u_pw if u_pw else None,
-        owner_pw=o_pw,
-        permissions=perm,
-        deflate=True
-    )
-    
+    out_pdf.save(output_buffer, encryption=fitz.PDF_ENCRYPT_AES_256,
+                 user_pw=u_pw if u_pw else None, owner_pw=o_pw,
+                 permissions=perm, deflate=True)
     out_pdf.close()
-    doc.close()
     return output_buffer.getvalue()
 
-uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ (PDF, DOCX, XLSX)", type=["pdf", "docx", "xlsx"])
+st.title("🛡️ Multi-Doc Security Shield")
+uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ", type=["pdf", "docx", "xlsx"])
 
-if uploaded_file is not None:
+if uploaded_file:
     file_ext = uploaded_file.name.split('.')[-1].lower()
+    owner_pw = "master_key_123"
     
     try:
-        with st.spinner('လုံခြုံရေးအလွှာများ ထည့်သွင်းပြီး ဖိုင်ဆိုဒ်ကို ချုံ့နေသည်...'):
-            # လက်ရှိတွင် PDF processing ကို အခြေခံထားသည်
-            # Word/Excel ကို PDF ပြောင်းရန် နည်းပညာအရ PDF stream သို့ အရင်ပို့ရပါမည်
-            final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
+        with st.spinner('Processing...'):
+            if file_ext == "pdf":
+                pdf_input = uploaded_file.read()
+            elif file_ext == "xlsx":
+                # Excel ကို အရင် PDF ပြောင်းမယ်
+                pdf_input = excel_to_pdf(uploaded_file)
+            elif file_ext == "docx":
+                # Word viewer logic (Simplified for this example)
+                st.error("Word processing requires additional layout settings.")
+                st.stop()
+            
+            final_data = protect_document(pdf_input, "", owner_pw)
 
             if final_data:
-                st.success(f"✅ အောင်မြင်စွာ လုပ်ဆောင်ပြီးပါပြီ။ (Size: {len(final_data)/1024:.2f} KB)")
+                st.success(f"✅ လုပ်ဆောင်ပြီးပါပြီ။")
                 st.download_button(
                     label="Download Protected PDF",
                     data=final_data,
@@ -91,6 +84,3 @@ if uploaded_file is not None:
                 )
     except Exception as e:
         st.error(f"Error: {e}")
-
-st.divider()
-st.caption("Optimized Version: JPG Compression + AES-256 Protection")

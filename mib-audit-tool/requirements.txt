@@ -1,5 +1,5 @@
 streamlit
 pymupdf
-openpyxl
 python-docx
-Pillow
+openpyxl
+pillow

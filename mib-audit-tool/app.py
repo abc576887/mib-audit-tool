@@ -26,6 +26,89 @@ st.markdown("""
 
 st.title("🛡️ Pro Document Security Shield")
 
+
+# ══════════════════════════════════════════════
+#  MYANMAR FONT LOADER
+#  ──────────────────────────────────────────────
+#  PyMuPDF သည် built-in font များဖြစ်သည့် "helv", "tiro" တို့ကို
+#  Myanmar Unicode အတွက် support မပေးပါ။ ထို့ကြောင့် Pyidaungsu
+#  သို့မဟုတ် Padauk font ကို download လုပ်ပြီး register လုပ်ရမည်။
+# ══════════════════════════════════════════════
+
+FONT_CACHE_PATH = "/tmp/myanmar_font.ttf"
+
+# Google Fonts မှ Padauk Regular (Myanmar Unicode font) ကို download လုပ်မည်
+MYANMAR_FONT_URL = "https://github.com/scosant/pyidaungsu/raw/main/Pyidaungsu-2.5.3_Regular.ttf"
+# Fallback: Noto Sans Myanmar
+NOTO_MYANMAR_URL = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansMyanmar/NotoSansMyanmar-Regular.ttf"
+
+@st.cache_resource(show_spinner=False)
+def load_myanmar_font() -> bytes | None:
+    """
+    Myanmar font ကို download လုပ်ပြီး cache သိမ်းသည်။
+    အောင်မြင်ရင် font bytes ပြန်ပေးသည်။ မအောင်မြင်ရင် None ပြန်ပေးသည်။
+    
+    st.cache_resource ကြောင့် app session တစ်ခုလုံးတွင် တစ်ကြိမ်သာ download လုပ်မည်။
+    """
+    import urllib.request
+
+    # System font path များ စစ်ဆေးသည် (Linux server တွင် install ထားပြီးဖြစ်တတ်သည်)
+    system_paths = [
+        "/usr/share/fonts/truetype/pyidaungsu/Pyidaungsu-Regular.ttf",
+        "/usr/share/fonts/truetype/padauk/Padauk.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMyanmar-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansMyanmar-Regular.ttf",
+    ]
+    for p in system_paths:
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                return f.read()
+
+    # Cache စစ်ဆေးသည်
+    if os.path.exists(FONT_CACHE_PATH):
+        with open(FONT_CACHE_PATH, "rb") as f:
+            return f.read()
+
+    # Download လုပ်သည်
+    for url in [MYANMAR_FONT_URL, NOTO_MYANMAR_URL]:
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                font_bytes = resp.read()
+            with open(FONT_CACHE_PATH, "wb") as f:
+                f.write(font_bytes)
+            return font_bytes
+        except Exception:
+            continue
+
+    return None  # Font မရပါ → Latin fallback သုံးမည်
+
+
+def register_myanmar_font(page: fitz.Page, font_bytes: bytes | None) -> str:
+    """
+    PyMuPDF page တွင် Myanmar font ကို register လုပ်ပြီး
+    သုံးရမည့် fontname ပြန်ပေးသည်။
+    Font မရလျှင် "helv" (Helvetica) fallback သုံးမည်။
+    
+    Parameters
+    ----------
+    page       : fitz.Page  — font register မည့် page
+    font_bytes : bytes|None — TTF font data
+    
+    Returns
+    -------
+    str — insert_text တွင် သုံးရမည့် fontname
+    """
+    if font_bytes is None:
+        return "helv"   # Fallback → Myanmar စာသားများ □ box ပြမည်
+
+    try:
+        # "myan" ဟူသော alias ဖြင့် register လုပ်သည်
+        page.insert_font(fontname="myan", fontbuffer=font_bytes)
+        return "myan"
+    except Exception:
+        return "helv"
+
+
 # ─── Sidebar ──────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Security Settings")
@@ -55,6 +138,15 @@ with st.sidebar:
     else:
         st.success("✅ PDF (Image-based) = Copy တကယ်မရနိုင်")
 
+    # Font status ပြသည်
+    st.divider()
+    with st.spinner("Myanmar font စစ်ဆေးနေသည်..."):
+        _font_bytes = load_myanmar_font()
+    if _font_bytes:
+        st.success(f"🗛 Myanmar Font: ✅ Ready ({len(_font_bytes)//1024} KB)")
+    else:
+        st.warning("🗛 Myanmar Font: ⚠️ မရ — Latin fallback သုံးမည်")
+
 
 # ══════════════════════════════════════════════
 #  HELPERS
@@ -71,6 +163,11 @@ def _sha512_hash(password: str):
 
 # ── 1. PDF → Protected PDF ────────────────────
 def protect_pdf(pdf_bytes: bytes, u_pw: str, o_pw: str) -> bytes:
+    """
+    PDF ကို image-based လုပ်ပြီး AES-256 encrypt လုပ်သည်။
+    Page ကို rasterize (pixmap) လုပ်သောကြောင့် Myanmar font
+    original ပုံအတိုင်း ထွက်ပြီး copy မရနိုင်ပါ။
+    """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     out = fitz.open()
     for page in doc:
@@ -192,62 +289,107 @@ def protect_xlsx(xlsx_bytes: bytes, password: str = None) -> bytes:
     return out.getvalue()
 
 
-# ── 4a. DOCX → PDF (python-docx render) ───────
+# ══════════════════════════════════════════════
+#  MYANMAR FONT AWARE TEXT WRITER
+#  ──────────────────────────────────────────────
+#  PyMuPDF ၏ insert_text သည် Unicode string ကို UTF-8 encode
+#  လုပ်ပြီး font glyph map မှ ပုံဆွဲသည်။ Myanmar font register
+#  ထားမှသာ Myanmar codepoint (U+1000–U+109F, U+A9E0–U+A9FF,
+#  U+AA60–U+AA7F) များကို ကောင်းကောင်း render လုပ်နိုင်သည်။
+# ══════════════════════════════════════════════
+
+def _measure_text(text: str, fontname: str, fontsize: float,
+                  font_bytes: bytes | None) -> float:
+    """
+    Myanmar font ရှိမရှိပေါ်မူတည်ပြီး text width တိုင်းသည်။
+    font_bytes ရှိလျှင် fitz.Font ဖြင့် တိုင်းသည်။
+    မရှိလျှင် helv estimate သုံးသည်။
+    """
+    if font_bytes and fontname == "myan":
+        try:
+            f = fitz.Font(fontbuffer=font_bytes)
+            return f.text_length(text, fontsize=fontsize)
+        except Exception:
+            pass
+    return fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
+
+
+# ── 4a. DOCX → PDF (Myanmar Font) ─────────────
 def docx_to_protected_pdf(docx_bytes: bytes, u_pw: str, o_pw: str) -> bytes:
     """
-    python-docx မှ text/table ကို extract လုပ်ပြီး
-    PyMuPDF ဖြင့် PDF page တည်ဆောက်ကာ protect လုပ်သည်။
-    Layout တိကျမှုထက် copy-protection ကို ဦးစားပေးသည်။
+    DOCX မှ text/table ကို extract လုပ်ပြီး PyMuPDF ဖြင့်
+    Myanmar font သုံး၍ PDF ထုတ်ကာ AES-256 protect လုပ်သည်။
+
+    အဓိက ပြောင်းလဲချက် (Myanmar Font Support):
+    ───────────────────────────────────────────
+    1. load_myanmar_font()   → TTF bytes ရယူသည်
+    2. register_myanmar_font() → page တစ်ခုစီတွင် "myan" alias ဖြင့် register
+    3. insert_text(..., fontname=fontname) → "myan" သို့မဟုတ် "helv" fallback
+    4. _measure_text() → word-wrap တွင် Myanmar font width ကို မှန်ကန်စွာ တိုင်းသည်
     """
     from docx import Document as DocxDocument
-    from docx.oxml.ns import qn
+
+    font_bytes = load_myanmar_font()   # ← Myanmar font bytes (cached)
 
     docx_doc = DocxDocument(io.BytesIO(docx_bytes))
-    out_pdf  = fitz.open()
+    out_pdf   = fitz.open()
 
-    PAGE_W, PAGE_H = 595, 842   # A4 points
-    MARGIN        = 50
-    LINE_H        = 14
-    FONT_SIZE     = 11
-    x_start       = MARGIN
-    y             = MARGIN
+    PAGE_W, PAGE_H = 595, 842
+    MARGIN         = 50
+    LINE_H         = 16      # Myanmar font တွင် line height ပိုလိုသည်
+    FONT_SIZE      = 11
+    x_start        = MARGIN
 
     def new_page():
         p = out_pdf.new_page(width=PAGE_W, height=PAGE_H)
-        return p, MARGIN
+        fn = register_myanmar_font(p, font_bytes)   # ← page တိုင်းတွင် register
+        return p, MARGIN, fn
 
-    page, y = new_page()
+    page, y, fontname = new_page()
 
-    def write_line(text, bold=False, size=FONT_SIZE):
-        nonlocal page, y
+    def write_line(text: str, size: float = FONT_SIZE):
+        """Myanmar text ပါဝင်သော line တစ်ကြောင်းကို PDF page တွင် ရေးသည်။"""
+        nonlocal page, y, fontname
+        if not text:
+            return
         if y + LINE_H > PAGE_H - MARGIN:
-            page, y = new_page()
-        font = "helv"
-        page.insert_text((x_start, y), text or " ",
-                         fontname=font, fontsize=size, color=(0, 0, 0))
+            page, y, fontname = new_page()
+        try:
+            page.insert_text(
+                (x_start, y),
+                text,
+                fontname=fontname,   # "myan" (Myanmar) သို့မဟုတ် "helv" (fallback)
+                fontsize=size,
+                color=(0, 0, 0),
+                encoding=fitz.TEXT_ENCODING_UNICODE,  # ← Unicode အတွက် မဖြစ်မနေ
+            )
+        except Exception:
+            # Myanmar render မအောင်မြင်လျှင် Latin-safe fallback
+            safe = "".join(c if ord(c) < 128 else "?" for c in text)
+            page.insert_text((x_start, y), safe,
+                             fontname="helv", fontsize=size, color=(0.4, 0.4, 0.4))
         y += LINE_H + 2
 
+    # ── Paragraph များ render ──
     for para in docx_doc.paragraphs:
-        text = para.text
+        text  = para.text
         style = para.style.name if para.style else ""
         size  = FONT_SIZE
-        if "Heading 1" in style:
-            size = 16
-        elif "Heading 2" in style:
-            size = 14
-        elif "Heading 3" in style:
-            size = 12
+        if   "Heading 1" in style: size = 16
+        elif "Heading 2" in style: size = 14
+        elif "Heading 3" in style: size = 12
 
         if text.strip() == "":
             y += LINE_H // 2
             continue
 
-        # Word-wrap
+        # Word-wrap: Myanmar font width ဖြင့် measure လုပ်သည်
+        max_w = PAGE_W - 2 * MARGIN
         words = text.split()
         line  = ""
         for word in words:
             test = (line + " " + word).strip()
-            if fitz.get_text_length(test, fontname="helv", fontsize=size) > (PAGE_W - 2 * MARGIN):
+            if _measure_text(test, fontname, size, font_bytes) > max_w:
                 write_line(line, size=size)
                 line = word
             else:
@@ -256,15 +398,15 @@ def docx_to_protected_pdf(docx_bytes: bytes, u_pw: str, o_pw: str) -> bytes:
             write_line(line, size=size)
         y += 2
 
-    # Tables
+    # ── Table များ render ──
     for table in docx_doc.tables:
-        y += 6
+        y += 8
         for row in table.rows:
-            row_text = " | ".join(cell.text.strip() for cell in row.cells)
+            row_text = " │ ".join(cell.text.strip() for cell in row.cells)
             write_line(row_text, size=10)
         y += 4
 
-    buf = io.BytesIO()
+    buf  = io.BytesIO()
     perm = int(fitz.PDF_PERM_ACCESSIBILITY)
     out_pdf.save(buf, encryption=fitz.PDF_ENCRYPT_AES_256,
                  user_pw=u_pw or None, owner_pw=o_pw,
@@ -273,62 +415,93 @@ def docx_to_protected_pdf(docx_bytes: bytes, u_pw: str, o_pw: str) -> bytes:
     return buf.getvalue()
 
 
-# ── 4b. XLSX → PDF (openpyxl render) ──────────
+# ── 4b. XLSX → PDF (Myanmar Font) ─────────────
 def xlsx_to_protected_pdf(xlsx_bytes: bytes, u_pw: str, o_pw: str) -> bytes:
     """
-    openpyxl မှ cell data ကို extract လုပ်ပြီး
-    PyMuPDF ဖြင့် PDF page တည်ဆောက်ကာ protect လုပ်သည်။
+    openpyxl မှ cell data ကို extract လုပ်ပြီး PyMuPDF ဖြင့်
+    Myanmar font သုံး၍ PDF ထုတ်ကာ AES-256 protect လုပ်သည်။
+
+    အဓိက ပြောင်းလဲချက် (Myanmar Font Support):
+    ───────────────────────────────────────────
+    1. page တစ်ခုစီတွင် register_myanmar_font() ခေါ်သည်
+    2. cell text ကို Myanmar font ဖြင့် insert_text လုပ်သည်
+    3. Column width truncate တွင် Myanmar font measure သုံးသည်
     """
     import openpyxl
 
-    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+    font_bytes = load_myanmar_font()   # ← Myanmar font bytes (cached)
+
+    wb      = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
     out_pdf = fitz.open()
 
     PAGE_W, PAGE_H = 842, 595   # A4 Landscape
     MARGIN   = 40
-    ROW_H    = 14
+    ROW_H    = 16               # Myanmar font line height
     FONT_SZ  = 9
     HDR_SZ   = 12
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
 
-        page = out_pdf.new_page(width=PAGE_W, height=PAGE_H)
-        y    = MARGIN
+        page     = out_pdf.new_page(width=PAGE_W, height=PAGE_H)
+        fontname = register_myanmar_font(page, font_bytes)   # ← register
+        y        = MARGIN
 
-        # Sheet title
-        page.insert_text((MARGIN, y), f"Sheet: {sheet_name}",
-                         fontname="helv", fontsize=HDR_SZ,
-                         color=(0.2, 0.2, 0.8))
+        # Sheet title (Myanmar name ပါနိုင်သည်)
+        try:
+            page.insert_text(
+                (MARGIN, y),
+                f"Sheet: {sheet_name}",
+                fontname=fontname,
+                fontsize=HDR_SZ,
+                color=(0.2, 0.2, 0.8),
+                encoding=fitz.TEXT_ENCODING_UNICODE,
+            )
+        except Exception:
+            page.insert_text((MARGIN, y), f"Sheet: {sheet_name}",
+                             fontname="helv", fontsize=HDR_SZ,
+                             color=(0.2, 0.2, 0.8))
         y += HDR_SZ + 6
 
         rows = list(ws.iter_rows(values_only=True))
         if not rows:
             continue
 
-        # Calculate column widths
-        n_cols     = max(len(r) for r in rows) if rows else 1
-        usable_w   = PAGE_W - 2 * MARGIN
-        col_w      = usable_w / max(n_cols, 1)
+        n_cols   = max(len(r) for r in rows)
+        usable_w = PAGE_W - 2 * MARGIN
+        col_w    = usable_w / max(n_cols, 1)
 
         for row_idx, row in enumerate(rows):
             if y + ROW_H > PAGE_H - MARGIN:
-                page = out_pdf.new_page(width=PAGE_W, height=PAGE_H)
-                y    = MARGIN
+                page     = out_pdf.new_page(width=PAGE_W, height=PAGE_H)
+                fontname = register_myanmar_font(page, font_bytes)   # ← new page တွင်လည်း register
+                y        = MARGIN
 
             for col_idx, val in enumerate(row):
                 x    = MARGIN + col_idx * col_w
                 text = str(val) if val is not None else ""
-                # Truncate if too long
-                while fitz.get_text_length(text, fontname="helv", fontsize=FONT_SZ) > col_w - 4 and len(text) > 1:
+
+                # Myanmar font ဖြင့် truncate: column ကျဉ်းလျှင် ဖြတ်ထားသည်
+                max_cell_w = col_w - 4
+                while len(text) > 1 and \
+                      _measure_text(text, fontname, FONT_SZ, font_bytes) > max_cell_w:
                     text = text[:-1]
 
                 color = (0.1, 0.1, 0.5) if row_idx == 0 else (0, 0, 0)
-                page.insert_text((x + 2, y), text,
-                                 fontname="helv", fontsize=FONT_SZ,
-                                 color=color)
+                try:
+                    page.insert_text(
+                        (x + 2, y),
+                        text,
+                        fontname=fontname,
+                        fontsize=FONT_SZ,
+                        color=color,
+                        encoding=fitz.TEXT_ENCODING_UNICODE,
+                    )
+                except Exception:
+                    safe = "".join(c if ord(c) < 128 else "?" for c in text)
+                    page.insert_text((x + 2, y), safe,
+                                     fontname="helv", fontsize=FONT_SZ, color=color)
 
-            # Row separator line
             page.draw_line((MARGIN, y + 3), (PAGE_W - MARGIN, y + 3),
                            color=(0.85, 0.85, 0.85), width=0.3)
             y += ROW_H
@@ -388,10 +561,10 @@ if uploaded_file:
                     label  = "PDF → Image-based + AES-256 Protected PDF"
                 elif ext == "docx":
                     result = docx_to_protected_pdf(raw, user_pw, owner_pw)
-                    label  = "DOCX → Text-rendered Protected PDF"
+                    label  = "DOCX → Myanmar Font PDF (Protected)"
                 elif ext == "xlsx":
                     result = xlsx_to_protected_pdf(raw, user_pw, owner_pw)
-                    label  = "XLSX → Table-rendered Protected PDF"
+                    label  = "XLSX → Myanmar Font Table PDF (Protected)"
                 out_name = f"Protected_{base}.pdf"
                 mime     = "application/pdf"
 
@@ -412,4 +585,4 @@ if uploaded_file:
         st.error(f"❌ Error: {e}")
 
 st.divider()
-st.caption("Pro Document Security Shield | No LibreOffice required | pymupdf + openpyxl + python-docx")
+st.caption("Pro Document Security Shield | Myanmar Font Support | pymupdf + openpyxl + python-docx")

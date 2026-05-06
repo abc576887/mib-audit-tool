@@ -1,49 +1,58 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import io
-import pandas as pd
-from docx import Document
 
 # Page setup
-st.set_page_config(page_title="Image-Based Secure Shield", layout="centered")
+st.set_page_config(page_title="Secure Image-PDF Shield", layout="centered")
 
-# --- UI Protection ---
+# --- UI Protection (Selection & Right-click ပိတ်ခြင်း) ---
 st.markdown("""
     <style> body { -webkit-user-select: none; user-select: none; } </style>
     <script> document.addEventListener('contextmenu', event => event.preventDefault()); </script>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ Image-Based PDF Shield")
-st.info("တင်သမျှဖိုင်များကို စာသားကူးမရသော 'ပုံရိပ်စစ်စစ်' PDF အဖြစ် ပြောင်းလဲပေးမည်။")
+st.title("🛡️ Image-PDF Shield (Password Protected)")
+st.info("စာသားကူးမရသော ပုံရိပ် PDF ပြောင်းပေးမည်ဖြစ်ပြီး ဖိုင်ဖွင့်ရန် Password ပါ သတ်မှတ်နိုင်ပါသည်။")
 
-def process_to_image_pdf(file_bytes, file_ext):
-    """မည်သည့်ဖိုင်ကိုမဆို Image-based PDF အဖြစ်ပြောင်းလဲခြင်း"""
+# Sidebar Settings
+with st.sidebar:
+    st.header("Security Settings")
+    use_password = st.checkbox("Open Password သတ်မှတ်မည်")
+    user_pw = ""
+    if use_password:
+        user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password ရိုက်ပါ", type="password", placeholder="ဥပမာ - 123456")
+    
+    st.divider()
+    owner_pw = "master_key_999" # Permission ပြန်ပြင်လိုလျှင်သုံးရန် (Internal use)
+
+def process_to_secure_pdf(file_bytes, u_pw, o_pw):
+    """PDF ကို Rasterize လုပ်ပြီး Password နှင့် Permissions များ ထည့်သွင်းခြင်း"""
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
     out_pdf = fitz.open()
     
-    # ၁။ PDF ဖြစ်လျှင် တိုက်ရိုက် Image ပြောင်းသည်
-    if file_ext == "pdf":
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-    
-    # ၂။ Excel ဖြစ်လျှင် ယာယီ PDF အရင်ပြောင်းရန် လိုအပ်သည် 
-    # (ဤနေရာတွင် ဥပမာအဖြစ် PDF rasterization logic ကို အဓိကပြထားပါသည်)
-    else:
-        # Word/Excel logic များအတွက် ယာယီစာမျက်နှာများ ဖန်တီးရန်
-        st.error(f"{file_ext.upper()} ကို Image PDF ပြောင်းရန် PDF အဖြစ် အရင်တင်ပေးပါ။")
-        return None
-
     for page in doc:
-        # ဆိုဒ်သေးအောင် DPI 120 နှင့် JPG Quality 60 သုံးထားပါသည်
+        # DPI 120 + JPG Quality 60 (ဖိုင်ဆိုဒ် သိသိသာသာ သေးစေရန်)
         pix = page.get_pixmap(dpi=120)
         img_data = pix.tobytes("jpg", jpg_quality=60)
         
+        # စာမျက်နှာအသစ်ပေါ်သို့ ပုံပြန်တင်ခြင်း
         new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
 
-    # Security Settings (Copy ပိတ်၊ Print ပိတ်)
+    # Permissions (Copy=0, Print=0, Edit=0)
     perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
+
     output_buffer = io.BytesIO()
-    out_pdf.save(output_buffer, encryption=fitz.PDF_ENCRYPT_AES_256, 
-                 owner_pw="admin123", permissions=perm, deflate=True)
+    
+    # Password နှင့် Encryption ထည့်သွင်းခြင်း
+    out_pdf.save(
+        output_buffer,
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        user_pw=u_pw if u_pw else None,  # ဖိုင်ဖွင့်ရန် Password
+        owner_pw=o_pw,                   # Permission များ ပြင်ရန် Master Password
+        permissions=perm,
+        deflate=True                     # ဖိုင်ဆိုဒ်ကို ထပ်မံချုံ့ခြင်း
+    )
     
     doc.close()
     out_pdf.close()
@@ -52,23 +61,21 @@ def process_to_image_pdf(file_bytes, file_ext):
 uploaded_file = st.file_uploader("PDF ဖိုင်တင်ပါ", type=["pdf"])
 
 if uploaded_file:
-    if st.button("Generate Secure Image-PDF"):
-        with st.spinner('ပုံရိပ်များအဖြစ် ပြောင်းလဲနေသည်...'):
-            final_pdf = process_to_image_pdf(uploaded_file.read(), "pdf")
-            
-            if final_pdf:
-                st.success(f"✅ အောင်မြင်စွာ ပြောင်းလဲပြီးပါပြီ။ ဆိုဒ်: {len(final_pdf)/1024:.1f} KB")
+    if st.button("Generate Secure File"):
+        with st.spinner('လုံခြုံရေးအလွှာများ ထည့်သွင်းနေသည်...'):
+            try:
+                final_pdf = process_to_secure_pdf(uploaded_file.read(), user_pw, owner_pw)
+                
+                st.success(f"✅ လုပ်ဆောင်ပြီးပါပြီ။ ဖိုင်ဆိုဒ်: {len(final_pdf)/1024:.1f} KB")
+                
                 st.download_button(
-                    label="Download Secure PDF",
+                    label="📥 Download Protected PDF",
                     data=final_pdf,
-                    file_name=f"Secure_Image_{uploaded_file.name}",
+                    file_name=f"Secure_{uploaded_file.name}",
                     mime="application/pdf"
                 )
+            except Exception as e:
+                st.error(f"Error: {e}")
 
 st.markdown("""
 ---
-### ဒီနည်းလမ်းရဲ့ အကျိုးကျေးဇူး:
-1. **No Text Data:** ဖိုင်ထဲမှာ စာသား (Text) လုံးဝမပါတော့ဘဲ ဓာတ်ပုံတွေပဲ ရှိတော့တာမို့ Copy လုံးဝကူးမရပါ။
-2. **Small Size:** JPG Compression သုံးထားလို့ ဖိုင်ဆိုဒ် အတော်လေး သေးသွားပါတယ်။
-3. **Myanmar Font Safe:** စာသားတွေက ပုံဖြစ်သွားပြီမို့ ဘယ်စက်မှာဖွင့်ဖွင့် မြန်မာစာ လုံးဝမပျက်ပါ။
-""")

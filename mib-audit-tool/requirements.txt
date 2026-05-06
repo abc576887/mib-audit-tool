@@ -1,6 +1,6 @@
 streamlit
 pymupdf
-Pillow
-python-docx
 pandas
 openpyxl
+python-docx
+docx2pdf

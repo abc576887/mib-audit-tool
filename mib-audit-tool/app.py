@@ -36,21 +36,27 @@ with st.sidebar:
     # Permission ပြန်ပြင်လိုပါက သုံးရန် Master Key
     owner_pw = "master_admin_key_123"
 
+
 def protect_document(pdf_stream, u_pw, o_pw):
-    """PDF ကို Rasterize လုပ်ပြီး Permission များ ပိတ်ခြင်း"""
+    """PDF ကို Rasterize လုပ်ပြီး Permission များ ပိတ်ခြင်း (Optimized Size Version)"""
     doc = fitz.open(stream=pdf_stream, filetype="pdf")
     out_pdf = fitz.open()
     
     for page in doc:
-        # စာမျက်နှာကို ပုံအဖြစ်ပြောင်း (DPI 200 သည် အရည်အသွေးနှင့် ဖိုင်ဆိုဒ် မျှတသည်)
-        pix = page.get_pixmap(dpi=200)
-        img_data = pix.tobytes("png")
-        
-        # စာမျက်နှာအသစ်ပေါ်သို့ ပုံပြန်တင်ခြင်း (Text Selection လုံးဝမရတော့ပါ)
+        # DPI လျှော့ (150 = size ↓ but still readable)
+        pix = page.get_pixmap(dpi=150)
+
+        # Optional: grayscale (လိုရင် uncomment)
+        # pix = fitz.Pixmap(fitz.csGRAY, pix)
+
+        # PNG → JPEG (size significantly smaller)
+        img_data = pix.tobytes("jpg")
+
+        # Rebuild page as image (no text selection)
         new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
 
-    # Adobe Permissions (Copy=0, Print=0, Edit=0)
+    # Permissions (no copy / print / edit)
     perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
 
     output_buffer = io.BytesIO()
@@ -59,11 +65,15 @@ def protect_document(pdf_stream, u_pw, o_pw):
         encryption=fitz.PDF_ENCRYPT_AES_256,
         user_pw=u_pw if u_pw else None,
         owner_pw=o_pw,
-        permissions=perm
+        permissions=perm,
+        garbage=4,      # remove unused objects
+        deflate=True,   # compress streams
+        clean=True      # optimize structure
     )
     out_pdf.close()
     doc.close()
     return output_buffer.getvalue()
+
 
 uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ (PDF, DOCX, XLSX)", type=["pdf", "docx", "xlsx"])
 
@@ -72,12 +82,13 @@ if uploaded_file is not None:
     
     try:
         with st.spinner('လုံခြုံရေးအလွှာများ ထည့်သွင်းနေသည်...'):
-            # ဖိုင်အမျိုးအစားအလိုက် ကိုင်တွယ်ပုံ (Simplified logic)
+            
             if file_ext == "pdf":
                 final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
             else:
-                # Word/Excel ဖြစ်ပါက PDF အရင်ပြောင်းရန် လိုအပ်သည်
-                # ဤနမူနာတွင် PDF processing ကိုသာ အဓိကထားသည်
+                # NOTE:
+                # DOCX/XLSX → PDF conversion not implemented here
+                # You must convert to PDF first before processing
                 final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
 
             if final_data:
@@ -88,8 +99,9 @@ if uploaded_file is not None:
                     file_name=f"Protected_{uploaded_file.name.split('.')[0]}.pdf",
                     mime="application/pdf"
                 )
+
     except Exception as e:
         st.error(f"Error: {e}")
 
 st.divider()
-st.caption("Developed with Streamlit & PyMuPDF (AES-256 Protection)")
+st.caption("Developed with Streamlit & PyMuPDF (AES-256 Protection, Optimized Compression)")

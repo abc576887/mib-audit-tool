@@ -1,43 +1,69 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import io
-import os
 import pandas as pd
 from docx import Document
+from fpdf import FPDF
 
 # Page setup
-st.set_page_config(page_title="Universal Secure PDF", layout="centered")
+st.set_page_config(page_title="Universal Auto-PDF Shield", layout="centered")
 
-# --- UI Protection (Selection & Right-click ပိတ်ခြင်း) ---
+# --- UI Protection (Copy/Selection ပိတ်ခြင်း) ---
 st.markdown("""
     <style> body { -webkit-user-select: none; user-select: none; } </style>
     <script> document.addEventListener('contextmenu', event => event.preventDefault()); </script>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Universal Secure PDF Shield")
-st.info("တင်သမျှဖိုင်ကို Copy ကူးမရသော Image-PDF အဖြစ် ပြောင်းလဲပေးမည်။")
+st.title("🛡️ Universal Auto-PDF Converter")
+st.info("Excel, Word, PDF ဘာတင်တင် Copy ကူးမရတဲ့ PDF အဖြစ် အလိုအလျောက် ပြောင်းပေးပါမယ်။")
 
-# Sidebar
+# Sidebar Security
 with st.sidebar:
-    st.header("Security Settings")
-    set_pw = st.checkbox("Password ခံမည်")
-    user_pw = st.text_input("Password ရိုက်ပါ", type="password") if set_pw else ""
-    owner_pw = "master_admin_key"
+    st.header("လုံခြုံရေး ဆက်တင်")
+    user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password (မခံချင်ရင် အလွတ်ထားပါ)", type="password")
+    owner_pw = "master_key_123"
+
+def excel_to_pdf_stream(file_bytes):
+    """Excel ကို PDF သို့ အလိုအလျောက်ပြောင်းခြင်း"""
+    df = pd.read_excel(io.BytesIO(file_bytes))
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+    # ဇယားခေါင်းစဉ်များ
+    cols = df.columns.tolist()
+    line_text = " | ".join([str(c) for c in cols])
+    pdf.multi_cell(0, 10, line_text, border=1)
+    # Data အတန်းများ (နမူနာ ၅၀ ထိ)
+    for i in range(min(len(df), 50)):
+        row_text = " | ".join([str(v) for v in df.iloc[i].values])
+        pdf.multi_cell(0, 10, row_text, border=1)
+    return pdf.output()
+
+def word_to_pdf_stream(file_bytes):
+    """Word ကို PDF သို့ အလိုအလျောက်ပြောင်းခြင်း"""
+    doc = Document(io.BytesIO(file_bytes))
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=11)
+    for para in doc.paragraphs:
+        if para.text.strip():
+            pdf.multi_cell(0, 10, para.text)
+    return pdf.output()
 
 def finalize_to_image_pdf(pdf_stream, u_pw, o_pw):
-    """Layout မပျက်စေဘဲ Image PDF ပြောင်းလဲပြီး ဆိုဒ်ချုံ့ခြင်း"""
+    """PDF ကို Copy ကူးမရအောင် Image-based လုပ်ပြီး ဆိုဒ်ချုံ့ခြင်း"""
     doc = fitz.open(stream=pdf_stream, filetype="pdf")
     out_pdf = fitz.open()
     
     for page in doc:
-        # DPI 150 + JPG Quality 70 (ဖတ်လို့ကြည်ပြီး ဆိုဒ်သေးစေရန်)
-        pix = page.get_pixmap(dpi=150)
+        # DPI 140 နဲ့ JPG Quality 70 သုံးပြီး ဆိုဒ်ချုံ့ပါတယ်
+        pix = page.get_pixmap(dpi=140)
         img_data = pix.tobytes("jpg", jpg_quality=70)
         
         new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
 
-    perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0) # Copy/Print ပိတ်
+    perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
     output_buffer = io.BytesIO()
     out_pdf.save(
         output_buffer,
@@ -51,49 +77,41 @@ def finalize_to_image_pdf(pdf_stream, u_pw, o_pw):
     out_pdf.close()
     return output_buffer.getvalue()
 
-uploaded_file = st.file_uploader("ဖိုင်ရွေးပါ (PDF, Word, Excel)", type=["pdf", "docx", "xlsx"])
+uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ", type=["pdf", "docx", "xlsx"])
 
 if uploaded_file:
     file_ext = uploaded_file.name.split('.')[-1].lower()
+    file_bytes = uploaded_file.read()
     
-    if st.button("Generate Secure Image-PDF"):
+    if st.button("🚀 PDF အဖြစ်ပြောင်းပြီး Download ဆွဲမည်"):
         try:
-            with st.spinner('Converting... (Layout မပျက်စေရန် လုပ်ဆောင်နေပါသည်)'):
-                
-                # ၁။ PDF တိုက်ရိုက်တင်လျှင်
+            with st.spinner('အနောက်ကွယ်တွင် PDF ပြောင်းလဲပြီး Image-based PDF အဖြစ် ကာကွယ်နေသည်...'):
+                # ၁။ ဖိုင်အမျိုးအစားအလိုက် PDF အရင်ပြောင်း
                 if file_ext == "pdf":
-                    pdf_input = uploaded_file.read()
+                    temp_pdf = file_bytes
+                elif file_ext == "xlsx":
+                    temp_pdf = excel_to_pdf_stream(file_bytes)
+                elif file_ext == "docx":
+                    temp_pdf = word_to_pdf_stream(file_bytes)
                 
-                # ၂။ Word/Excel တင်လျှင် (Layout မပျက်စေရန် အသိပေးချက်)
-                else:
-                    st.warning(f"{file_ext.upper()} ဖိုင်များအတွက် Layout ၁၀၀% တိကျစေရန် PDF အဖြစ် Save ပြီးမှ တင်ပေးပါရန် အကြံပြုပါသည်။")
-                    # အောက်ပါတို့သည် ရိုးရှင်းသော conversion များအတွက်သာဖြစ်သည်
-                    if file_ext == "xlsx":
-                        # Excel to PDF logic (Simplified)
-                        df = pd.read_excel(uploaded_file)
-                        st.write("Excel Data Preview:", df.head())
-                        st.error("Excel ကို PDF အဖြစ် အရင်ပြောင်းပြီးမှ တင်ပေးပါ။")
-                        st.stop()
-                    elif file_ext == "docx":
-                        st.error("Word ကို PDF အဖြစ် အရင်ပြောင်းပြီးမှ တင်ပေးပါ။")
-                        st.stop()
-
-                # ၃။ အပြီးသတ် Image-based PDF ပြောင်းလဲခြင်း
-                final_data = finalize_to_image_pdf(pdf_input, user_pw, owner_pw)
+                # ၂။ Copy ကူးမရအောင် Image PDF အဖြစ် အပြီးသတ်ပြောင်း
+                final_pdf = finalize_to_image_pdf(temp_pdf, user_pw, owner_pw)
                 
-                st.success(f"✅ လုပ်ဆောင်ပြီးပါပြီ။ (Size: {len(final_data)/1024:.1f} KB)")
+                st.success(f"✅ လုပ်ဆောင်ပြီးပါပြီ။ ဖိုင်ဆိုဒ်: {len(final_pdf)/1024:.1f} KB")
                 st.download_button(
-                    label="📥 Download Secure PDF",
-                    data=final_data,
+                    label="📥 Download Protected PDF",
+                    data=final_pdf,
                     file_name=f"Secure_{uploaded_file.name.split('.')[0]}.pdf",
                     mime="application/pdf"
                 )
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error: {e}. (ဖိုင်အရမ်းရှုပ်ထွေးလျှင် PDF အဖြစ် Save ပြီးမှ တင်ပေးပါ)")
 
 st.markdown("""
 ---
-### 💡 ဘာကြောင့် PDF အရင်ပြောင်းခိုင်းတာလဲ?
-* **Layout ၁၀၀% မှန်စေရန်:** Word/Excel ကို App ထဲမှာ တိုက်ရိုက်ပြောင်းရင် မြန်မာစာနဲ့ ဇယားကွက်တွေ ပျက်တတ်ပါတယ်။ Microsoft Office ထဲမှာ **Save As PDF** လုပ်တာက အကောင်းဆုံးပါ။
-* **Copy လုံးဝမရခြင်း:** App က ရလာတဲ့ PDF ကို Image PDF အဖြစ် ထပ်မံပြောင်းလဲပေးတဲ့အတွက် ဘယ်သူမှ Copy ကူးလို့ မရတော့ပါဘူး။
+### 💡 အလုပ်လုပ်ပုံ အဆင့်ဆင့်-
+1. သင်က **Excel** သို့မဟုတ် **Word** ကို တိုက်ရိုက်တင်လိုက်ပါ။
+2. App က အနောက်ကွယ်မှာ PDF အဖြစ် အလိုအလျောက် ပြောင်းပေးပါမယ်။
+3. ရလာတဲ့ PDF ကို **Image (ပုံရိပ်)** အဖြစ် ထပ်ပြောင်းလိုက်လို့ ဘယ်သူမှ Copy ကူးလို့ မရတော့ပါဘူး။
+4. ဖိုင်ဆိုဒ်သေးအောင်လည်း JPG နည်းပညာနဲ့ ချုံ့ပေးထားပါတယ်။
 """)

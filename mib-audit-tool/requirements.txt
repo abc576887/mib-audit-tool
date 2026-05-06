@@ -1,7 +1,4 @@
 streamlit
 PyMuPDF
-Pillow
-python-docx
-pandas
-openpyxl
-fpdf2
+lxml
+libreoffice

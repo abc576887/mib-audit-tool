@@ -1,6 +1,4 @@
 streamlit
 pymupdf
+aspose-words
 pandas
-openpyxl
-python-docx
-fpdf2

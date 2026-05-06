@@ -1,4 +1,6 @@
 streamlit
-pymupdf
-aspose-words
+PyMuPDF
+Pillow
+python-docx
 pandas
+openpyxl

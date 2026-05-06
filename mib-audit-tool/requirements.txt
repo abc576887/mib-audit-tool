@@ -4,3 +4,4 @@ Pillow
 python-docx
 pandas
 openpyxl
+fpdf2

@@ -3,4 +3,4 @@ pymupdf
 pandas
 openpyxl
 python-docx
-docx2pdf
+fpdf2

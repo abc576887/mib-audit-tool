@@ -1,98 +1,96 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import io
-import pandas as pd
 from docx import Document
-from fpdf import FPDF
+import pandas as pd
 
-st.set_page_config(page_title="Secure Image-PDF Shield", layout="centered")
+# Page setup
+st.set_page_config(page_title="Pro Secure Doc Shield", layout="centered")
 
-# UI Protection
+# --- UI Protection (Right-click & Selection ပိတ်ခြင်း) ---
 st.markdown("""
-    <style> body { -webkit-user-select: none; user-select: none; } </style>
-    <script> document.addEventListener('contextmenu', event => event.preventDefault()); </script>
-""", unsafe_allow_html=True)
+    <style>
+    body { -webkit-user-select: none; user-select: none; }
+    .stApp { pointer-events: auto; }
+    </style>
+    <script>
+    document.addEventListener('contextmenu', event => event.preventDefault());
+    document.onkeydown = function(e) {
+        if (e.ctrlKey && (e.keyCode === 67 || e.keyCode === 86 || e.keyCode === 85 || e.keyCode === 83 || e.keyCode === 80)) {
+            return false;
+        }
+    };
+    </script>
+    """, unsafe_allow_html=True)
 
-st.title("🔐 Secure Image-PDF Shield")
+st.title("🛡️ Pro Document Security Shield")
+st.info("ဖိုင်ဆိုဒ်ကို ချုံ့ပေးထားပြီး Copy/Print ပိတ်ထားသော PDF အဖြစ် ပြောင်းလဲပေးမည်။")
 
+# Sidebar Settings
 with st.sidebar:
-    st.header("လုံခြုံရေး")
-    user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password သတ်မှတ်ပါ", type="password")
-
-def excel_to_pdf_stream(file_bytes):
-    df = pd.read_excel(io.BytesIO(file_bytes))
-    pdf = FPDF(orientation='L', unit='mm', format='A4') # အလျားလိုက် (Landscape) ပြောင်းလိုက်တယ်
-    pdf.add_page()
-    pdf.set_font("Arial", size=9)
+    st.header("Security Settings")
+    set_password = st.checkbox("Open Password ခံမည်")
+    user_pw = ""
+    if set_password:
+        user_pw = st.text_input("ဖိုင်ဖွင့်ရန် Password", type="password")
     
-    # Error မတက်အောင် cell width ကို စာမျက်နှာအကျယ်အတိုင်း ပေးလိုက်ခြင်း
-    page_width = pdf.w - 2 * pdf.l_margin
-    
-    for i in range(min(len(df), 200)): # အတန်း ၂၀၀ ထိ တိုးပေးထားတယ်
-        row_text = " | ".join([str(v) for v in df.iloc[i].values])
-        # w=0 ဆိုတာ စာမျက်နှာအဆုံးထိ အလိုအလျောက် ယူခိုင်းတာပါ
-        pdf.multi_cell(w=0, h=8, txt=row_text, border=1)
-    return pdf.output()
+    owner_pw = "master_admin_key_123"
 
-def word_to_pdf_stream(file_bytes):
-    doc = Document(io.BytesIO(file_bytes))
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=11)
-    for para in doc.paragraphs:
-        if para.text.strip():
-            # w=0 သုံးထားလို့ Horizontal space error မတက်တော့ပါ
-            pdf.multi_cell(w=0, h=10, txt=para.text)
-    return pdf.output()
-
-def convert_to_secure_image_pdf(pdf_stream, password):
+def protect_document(pdf_stream, u_pw, o_pw):
+    """ဖိုင်ဆိုဒ်ကို အတတ်နိုင်ဆုံး လျှော့ချထားသော Protection Function"""
     doc = fitz.open(stream=pdf_stream, filetype="pdf")
     out_pdf = fitz.open()
+    
     for page in doc:
+        # DPI ကို 150 သို့လျှော့ချခြင်း (ဖိုင်ဆိုဒ် သိသိသာသာ သေးသွားစေသည်)
         pix = page.get_pixmap(dpi=150)
-        img_data = pix.tobytes("jpg", jpg_quality=75)
+        
+        # PNG အစား JPG သုံးပြီး Quality ကို 70% ထားခြင်း (ဆိုဒ်အလွန်သေးသွားစေသည်)
+        img_data = pix.tobytes("jpg", jpg_quality=70)
+        
         new_page = out_pdf.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, stream=img_data)
 
+    # Adobe Permissions (Copy=0, Print=0, Edit=0)
+    perm = int(fitz.PDF_PERM_ACCESSIBILITY | 0)
+
     output_buffer = io.BytesIO()
+    
+    # deflate=True သုံးပြီး PDF ထဲက Data များကို ထပ်မံချုံ့ခြင်း
     out_pdf.save(
         output_buffer,
         encryption=fitz.PDF_ENCRYPT_AES_256,
-        user_pw=password if password else None,
-        owner_pw="master_999",
+        user_pw=u_pw if u_pw else None,
+        owner_pw=o_pw,
+        permissions=perm,
         deflate=True
     )
-    doc.close()
+    
     out_pdf.close()
+    doc.close()
     return output_buffer.getvalue()
 
-uploaded_file = st.file_uploader("ဖိုင်ရွေးပါ (Word, Excel, PDF)", type=["pdf", "docx", "xlsx"])
+uploaded_file = st.file_uploader("ဖိုင်ရွေးချယ်ပါ (PDF, DOCX, XLSX)", type=["pdf", "docx", "xlsx"])
 
-if uploaded_file:
+if uploaded_file is not None:
     file_ext = uploaded_file.name.split('.')[-1].lower()
-    file_bytes = uploaded_file.read()
     
-    if st.button("🚀 Password ဖြင့် PDF ပြောင်းမည်"):
-        if not user_pw:
-            st.warning("Password အရင်ရိုက်ပေးပါ။")
-        else:
-            try:
-                with st.spinner('Processing...'):
-                    if file_ext == "pdf":
-                        temp_pdf = file_bytes
-                    elif file_ext == "xlsx":
-                        temp_pdf = excel_to_pdf_stream(file_bytes)
-                    elif file_ext == "docx":
-                        temp_pdf = word_to_pdf_stream(file_bytes)
-                    
-                    final_pdf = convert_to_secure_image_pdf(temp_pdf, user_pw)
-                    
-                    st.success("✅ အောင်မြင်စွာ ပြောင်းလဲပြီးပါပြီ။")
-                    st.download_button(
-                        label="📥 Download Now",
-                        data=final_pdf,
-                        file_name=f"Secure_{uploaded_file.name.split('.')[0]}.pdf",
-                        mime="application/pdf"
-                    )
-            except Exception as e:
-                st.error(f"Error: {e}")
+    try:
+        with st.spinner('လုံခြုံရေးအလွှာများ ထည့်သွင်းပြီး ဖိုင်ဆိုဒ်ကို ချုံ့နေသည်...'):
+            # လက်ရှိတွင် PDF processing ကို အခြေခံထားသည်
+            # Word/Excel ကို PDF ပြောင်းရန် နည်းပညာအရ PDF stream သို့ အရင်ပို့ရပါမည်
+            final_data = protect_document(uploaded_file.read(), user_pw, owner_pw)
+
+            if final_data:
+                st.success(f"✅ အောင်မြင်စွာ လုပ်ဆောင်ပြီးပါပြီ။ (Size: {len(final_data)/1024:.2f} KB)")
+                st.download_button(
+                    label="Download Protected PDF",
+                    data=final_data,
+                    file_name=f"Protected_{uploaded_file.name.split('.')[0]}.pdf",
+                    mime="application/pdf"
+                )
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+st.divider()
+st.caption("Optimized Version: JPG Compression + AES-256 Protection")
